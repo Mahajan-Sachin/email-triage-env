@@ -1,0 +1,122 @@
+name: email_triage_env
+version: "1.0.0"
+description: >
+  A real-world OpenEnv environment that trains AI agents to triage, categorise,
+  prioritise, and resolve incoming customer support emails. Supports three task
+  difficulty levels with programmatic, variance-rich graders.
+
+author: "Hackathon Team"
+tags:
+  - email
+  - triage
+  - customer-support
+  - routing
+  - nlp
+  - classification
+
+# ── Action Space ──────────────────────────────────────────────────────────────
+action_space:
+  type: EmailAction
+  description: >
+    Structured action specifying what the agent does with the incoming email.
+  fields:
+    action_type:
+      type: string
+      enum: [categorize, set_priority, draft_reply, escalate, archive]
+      required: true
+    category:
+      type: string
+      enum: [support, sales, spam, internal, billing]
+      description: Required when action_type=categorize
+    priority:
+      type: string
+      enum: [low, medium, high, urgent]
+      description: Required when action_type=set_priority
+    reply_draft:
+      type: string
+      min_length: 10
+      description: Required when action_type=draft_reply
+    escalation_reason:
+      type: string
+      min_length: 5
+      description: Required when action_type=escalate
+
+# ── Observation Space ─────────────────────────────────────────────────────────
+observation_space:
+  type: EmailObservation
+  description: >
+    What the agent observes at each step — full email content plus current
+    triage state and dense progress signal.
+  fields:
+    email_id:        {type: string}
+    email_subject:   {type: string}
+    email_body:      {type: string}
+    sender:          {type: string}
+    thread_length:   {type: integer, min: 1}
+    current_category: {type: string, nullable: true}
+    current_priority: {type: string, nullable: true}
+    reply_drafted:   {type: boolean}
+    escalated:       {type: boolean}
+    message:         {type: string}
+    available_actions: {type: array, items: string}
+    progress:        {type: float, min: 0.0, max: 1.0}
+    task_level:      {type: string, enum: [easy, medium, hard]}
+    done:            {type: boolean}
+    reward:          {type: float, min: 0.0, max: 1.0, nullable: true}
+
+# ── State Space ───────────────────────────────────────────────────────────────
+state_space:
+  type: EmailState
+  description: >
+    Internal environment state (hidden from agent). Tracks ground-truth labels,
+    accumulated decisions, and partial-reward bookkeeping flags.
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+tasks:
+  - name: easy
+    description: >
+      Categorise the incoming email into one of five categories:
+      support / sales / spam / internal / billing.
+      Max reward = 1.0 (exact category match).
+    difficulty: easy
+    max_steps: 5
+    grader:
+      type: programmatic
+      score_range: [0.0, 1.0]
+      deterministic: true
+
+  - name: medium
+    description: >
+      Categorise the email AND assign the correct priority level
+      (low / medium / high / urgent), then take the appropriate terminal action.
+      Graded: category (40%) + priority (30%) + terminal action (30%).
+    difficulty: medium
+    max_steps: 8
+    grader:
+      type: programmatic
+      score_range: [0.0, 1.0]
+      deterministic: true
+
+  - name: hard
+    description: >
+      Full resolution — categorise, set priority, then either draft a
+      professional reply or escalate with a detailed reason.
+      Reply quality evaluated on length, professionalism, and topic-keyword
+      coverage. Escalation quality also scored.
+      Graded: category (30%) + priority (30%) + terminal action (40%).
+    difficulty: hard
+    max_steps: 12
+    grader:
+      type: programmatic
+      score_range: [0.0, 1.0]
+      deterministic: true
+
+# ── Server Endpoints ──────────────────────────────────────────────────────────
+endpoints:
+  health:   GET  /health
+  reset:    POST /reset
+  step:     POST /step
+  state:    GET  /state
+  tasks:    GET  /tasks
+  grader:   POST /grader
+  baseline: GET  /baseline

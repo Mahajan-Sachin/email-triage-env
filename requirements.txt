@@ -1,0 +1,16 @@
+# Core OpenEnv runtime
+openenv-core>=0.2.2
+
+# Web server
+fastapi>=0.115.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# HTTP client (used by client.py and baseline.py)
+requests>=2.31.0
+
+# OpenAI SDK (used by baseline.py)
+openai>=1.14.0
+
+# YAML support (used by openenv validate)
+pyyaml>=6.0.1
