@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.env
+*.egg-info/
+dist/
+build/
+.DS_Store
+baseline_results.json
+inference_results.json
