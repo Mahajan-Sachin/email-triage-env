@@ -1,3 +1,18 @@
+---
+title: Email Triage Env
+emoji: 📧
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+tags:
+  - openenv
+  - email
+  - rl
+  - reinforcement-learning
+---
+
 # Email Triage & Intelligent Routing Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compatible-blue)](https://github.com/meta-pytorch/OpenEnv)
