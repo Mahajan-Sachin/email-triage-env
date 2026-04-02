@@ -1,152 +1,113 @@
-"""
-Email Triage OpenEnv — server/app.py
-Clean, production-ready version for hackathon submission.
-"""
-
-from __future__ import annotations
-
-import os
-import sys
-import uuid
-from typing import Any, Dict, Optional
-
+# server/app.py
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from typing import Any, Dict, Optional
+import uuid
 
-# Simple path setup
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
-# Import environment and models
+# Import environment
 try:
-    from server.environment import EmailTriageEnvironment
+    from environment import EmailTriageEnvironment
 except ImportError:
-    from environment import EmailTriageEnvironment  # type: ignore
+    from .environment import EmailTriageEnvironment
 
 try:
     from models import EmailAction
 except ImportError:
-    from email_triage_env.models import EmailAction  # type: ignore
+    from ..models import EmailAction
 
+app = FastAPI(title="Email Triage OpenEnv")
 
-app = FastAPI(
-    title="Email Triage OpenEnv",
-    description="Real-world email triage environment for training AI agents.",
-    version="1.0.0",
-)
-
-# Session registry: episode_id → Environment instance
+# Session registry to support multiple concurrent episodes
 _sessions: Dict[str, EmailTriageEnvironment] = {}
-
+_session_lock = None  # Will be initialized on first use
 
 class ResetRequest(BaseModel):
-    seed: Optional[int] = Field(default=None)
-    task_level: str = Field(default="easy")
-
+    seed: Optional[int] = None
+    task_level: str = "easy"
 
 class StepRequest(BaseModel):
-    action: Dict[str, Any] = Field(...)
-    episode_id: Optional[str] = Field(default=None)
-
-
-class GraderRequest(BaseModel):
-    episode_id: Optional[str] = Field(default=None)
-
+    action: Dict[str, Any]
+    episode_id: Optional[str] = None
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "environment": "email_triage_env"}
 
-
 @app.post("/reset")
 async def reset(req: ResetRequest):
+    global _session_lock
+    if _session_lock is None:
+        import threading
+        _session_lock = threading.Lock()
+
     episode_id = str(uuid.uuid4())
-    _sessions[episode_id] = EmailTriageEnvironment()
 
-    env = _sessions[episode_id]
-    obs = env.reset(seed=req.seed, episode_id=episode_id, task_level=req.task_level)
+    with _session_lock:
+        env = EmailTriageEnvironment()
+        obs = env.reset(seed=req.seed, episode_id=episode_id, task_level=req.task_level)
 
-    return JSONResponse(content={
-        "observation": obs.model_dump(),
+        _sessions[episode_id] = env
+
+    return {
         "episode_id": episode_id,
-        "reward": None,
+        "observation": obs.model_dump(),
         "done": False,
-    })
-
+        "reward": None
+    }
 
 @app.post("/step")
 async def step(req: StepRequest):
     if not req.episode_id or req.episode_id not in _sessions:
-        raise HTTPException(
-            status_code=400,
-            detail="Valid episode_id is required. Call /reset first."
-        )
+        raise HTTPException(status_code=400, detail="Valid episode_id is required")
 
     env = _sessions[req.episode_id]
     try:
-        action_obj = EmailAction(**req.action)
-        obs = env.step(action_obj)
-        return JSONResponse(content={
+        action = EmailAction(**req.action)
+        obs = env.step(action)
+        return {
             "observation": obs.model_dump(),
             "reward": obs.reward,
-            "done": obs.done,
-            "episode_id": req.episode_id,
-        })
+            "done": obs.done
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/state")
-async def get_state(episode_id: Optional[str] = None):
-    if not episode_id or episode_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    try:
-        return JSONResponse(content=_sessions[episode_id].state.model_dump())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+async def get_state(episode_id: str):
+    if episode_id not in _sessions:
+        raise HTTPException(status_code=400, detail="Valid episode_id is required")
+    env = _sessions[episode_id]
+    return env.state.model_dump()
 
 @app.get("/tasks")
 async def get_tasks():
-    return JSONResponse(content={"tasks": EmailTriageEnvironment.get_tasks()})
-
+    return {"tasks": EmailTriageEnvironment.get_tasks()}
 
 @app.post("/grader")
-async def grader(req: GraderRequest = GraderRequest()):
-    if not req.episode_id or req.episode_id not in _sessions:
+async def grader(req: Dict[str, Any]):
+    episode_id = req.get("episode_id")
+    if not episode_id or episode_id not in _sessions:
         raise HTTPException(status_code=400, detail="Valid episode_id is required")
-    try:
-        scores = _sessions[req.episode_id].grade()
-        return JSONResponse(content=scores)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+    env = _sessions[episode_id]
+    return env.grade()
 
 @app.get("/baseline")
-async def baseline(task_level: str = "easy", seed: Optional[int] = 42):
-    """Self-contained baseline run"""
+async def baseline(task_level: str = "easy"):
     env = EmailTriageEnvironment()
-    obs = env.reset(seed=seed, task_level=task_level)
-    action_seq = EmailTriageEnvironment.baseline_action(obs.model_dump())
+    obs = env.reset(task_level=task_level)
+    action_sequence = env.baseline_action(obs.model_dump())
 
-    rewards = []
-    for action_data in action_seq.get("steps", []):
-        try:
-            obs2 = env.step(EmailAction(**action_data))
-            rewards.append(obs2.reward or 0.0)
-        except Exception:
-            rewards.append(0.0)
-
-    return JSONResponse(content={
+    return {
         "task_level": task_level,
-        "baseline_steps": action_seq.get("steps", []),
-        "total_reward": round(sum(rewards), 4),
-        "grader_scores": env.grade(),
-    })
+        "baseline_actions": action_sequence["steps"],
+        "grader_scores": env.grade()
+    }
 
+def main():
+    import uvicorn
+    uvicorn.run("server.app:app", host="0.0.0.0", port=8000, log_level="info")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    main()

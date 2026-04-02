@@ -14,3 +14,5 @@ openai>=1.14.0
 
 # YAML support (used by openenv validate)
 pyyaml>=6.0.1
+
+python-dotenv

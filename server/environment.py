@@ -17,27 +17,30 @@ from typing import Any, Dict, List, Optional
 # Fallback stub is minimal but signature-accurate.
 # ---------------------------------------------------------------------------
 try:
-    from openenv.core.env_server.interfaces import Environment
+    from openenv.core.env_server import Environment
 except ImportError:
-    class Environment(ABC):  # type: ignore[no-redef]
-        """Minimal local stub — used only when openenv package is not installed."""
-        SUPPORTS_CONCURRENT_SESSIONS: bool = False
+    try:
+        from openenv.core.env_server.interfaces import Environment
+    except ImportError:
+        class Environment(ABC):  # type: ignore[no-redef]
+            """Minimal local stub — used only when openenv package is not installed."""
+            SUPPORTS_CONCURRENT_SESSIONS: bool = False
 
-        def __init__(self, transform: Any = None, rubric: Any = None) -> None:
-            self.transform = transform
-            self.rubric = rubric
+            def __init__(self, transform: Any = None, rubric: Any = None) -> None:
+                self.transform = transform
+                self.rubric = rubric
 
-        @abstractmethod
-        def reset(self, seed: Optional[int] = None,
-                  episode_id: Optional[str] = None, **kwargs: Any) -> Any: ...
+            @abstractmethod
+            def reset(self, seed: Optional[int] = None,
+                      episode_id: Optional[str] = None, **kwargs: Any) -> Any: ...
 
-        @abstractmethod
-        def step(self, action: Any, timeout_s: Optional[float] = None,
-                 **kwargs: Any) -> Any: ...
+            @abstractmethod
+            def step(self, action: Any, timeout_s: Optional[float] = None,
+                     **kwargs: Any) -> Any: ...
 
-        @property
-        @abstractmethod
-        def state(self) -> Any: ...
+            @property
+            @abstractmethod
+            def state(self) -> Any: ...
 
 # ---------------------------------------------------------------------------
 # Models import (PYTHONPATH=/app set by Dockerfile)
