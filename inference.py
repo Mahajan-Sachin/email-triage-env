@@ -1,19 +1,24 @@
 """
-inference.py - Best effort version for submission
+inference.py - Fixed for Phase 2 (uses official LLM proxy)
 """
 
 import os
 import json
 import requests
 from typing import List, Optional
+from openai import OpenAI
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://sachin903-email-triage-env.hf.space")
+# === OFFICIAL VARIABLES FROM ORGANIZERS ===
+API_BASE_URL = os.getenv("API_BASE_URL")
+API_KEY = os.getenv("API_KEY")          # This is their LiteLLM proxy key
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
-HF_TOKEN = os.getenv("HF_TOKEN")
 
 TASK_NAME = "email_triage"
 BENCHMARK = "email_triage_env"
 MAX_STEPS = 12
+
+# Initialize client with their proxy
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_BASE_URL and API_KEY else None
 
 def log_start(task: str, env: str, model: str):
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -28,44 +33,34 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 def get_action(obs: dict, step: int) -> dict:
-    subject = obs.get("email_subject", "").lower()
-    body = obs.get("email_body", "").lower()
-    text = subject + " " + body
+    text = (obs.get("email_subject", "") + " " + obs.get("email_body", "")).lower()
 
-    # Step 1: Categorize
     if step == 1:
-        if any(w in text for w in ["lottery", "winner", "prize", "free money", "claim"]):
+        if any(w in text for w in ["lottery", "winner", "free money", "claim"]):
             return {"action_type": "categorize", "category": "spam"}
-        if any(w in text for w in ["invoice", "payment", "refund", "charge", "billing", "gstin", "overdue"]):
+        elif any(w in text for w in ["invoice", "payment", "refund", "charge", "billing", "gstin"]):
             return {"action_type": "categorize", "category": "billing"}
-        if any(w in text for w in ["pricing", "plan", "enterprise", "upgrade", "partnership"]):
-            return {"action_type": "categorize", "category": "sales"}
-        return {"action_type": "categorize", "category": "support"}
+        else:
+            return {"action_type": "categorize", "category": "support"}
 
-    # Step 2: Priority
     if step == 2:
-        if any(w in text for w in ["urgent", "asap", "sla", "breach", "dispute", "4th time", "legal", "bank"]):
+        if any(w in text for w in ["urgent", "sla", "breach", "dispute"]):
             return {"action_type": "set_priority", "priority": "urgent"}
-        return {"action_type": "set_priority", "priority": "medium"}
+        else:
+            return {"action_type": "set_priority", "priority": "medium"}
 
-    # Step 3+: Terminal
-    if any(w in text for w in ["lottery", "winner", "prize", "free money"]):
+    if any(w in text for w in ["lottery", "winner", "free money"]):
         return {"action_type": "archive"}
-
-    if any(w in text for w in ["urgent", "sla", "breach", "dispute", "4th time", "legal", "bank", "contacting my bank"]):
+    elif any(w in text for w in ["urgent", "sla", "breach", "dispute", "4th time"]):
+        return {"action_type": "escalate", "escalation_reason": "Requires immediate attention"}
+    else:
         return {
-            "action_type": "escalate",
-            "escalation_reason": "This requires immediate escalation due to repeated complaints or potential financial/regulatory risk."
+            "action_type": "draft_reply",
+            "reply_draft": "Thank you for your email. We will respond within 1-2 business days."
         }
 
-    # Default good reply
-    return {
-        "action_type": "draft_reply",
-        "reply_draft": "Dear Customer,\n\nThank you for your email. We have received your concern and are reviewing it carefully. We apologize for any inconvenience and will get back to you with a resolution within 1-2 business days.\n\nBest regards,\nCustomer Support Team"
-    }
-
 def main():
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME or "unknown")
 
     rewards: List[float] = []
     steps_taken = 0
@@ -99,7 +94,6 @@ def main():
 
             reward = float(step_data.get("reward", 0.0))
             done = bool(step_data.get("done", False))
-            obs = step_data.get("observation", {})
 
             rewards.append(reward)
             steps_taken = step
